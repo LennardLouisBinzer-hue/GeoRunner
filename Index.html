@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Geo Dash: Farm & Rush</title>
+    <style>
+        :root {
+            --neon-blue: #00f3ff;
+            --neon-pink: #bc13fe;
+            --bg-dark: #111;
+            --panel-bg: rgba(20, 20, 30, 0.95);
+        }
+
+        * { box-sizing: border-box; user-select: none; -webkit-user-select: none; touch-action: none; }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-dark);
+            color: white;
+            font-family: 'Segoe UI', sans-serif;
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        canvas {
+            box-shadow: 0 0 50px rgba(0, 243, 255, 0.1);
+            background: linear-gradient(to bottom, #1a1a2e, #0a0a15);
+            display: block;
+        }
+
+        /* UI Overlay */
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            z-index: 10;
+        }
+
+        .hud {
+            display: flex;
+            justify-content: space-between;
+            font-weight: bold;
+            text-shadow: 0 0 10px black;
+            font-size: 1.2rem;
+            pointer-events: auto;
+            align-items: center;
+        }
+
+        .hud-right {
+            display: flex;
+            gap: 10px;
+        }
+
+        .coin-counter { color: #ffd700; display: flex; align-items: center; gap: 8px; }
+
+        /* Modals / Menüs */
+        .modal {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            background: var(--panel-bg);
+            border: 2px solid var(--neon-blue);
+            padding: 30px;
+            border-radius: 10px;
+            text-align: center;
+            pointer-events: auto;
+            display: none;
+            flex-direction: column;
+            gap: 15px;
+            box-shadow: 0 0 20px var(--neon-blue);
+            min-width: 300px;
+            z-index: 100;
+        }
+
+        .modal.active { display: flex; }
+
+        h1 {
+            margin: 0;
+            color: var(--neon-blue);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            text-shadow: 0 0 10px var(--neon-blue);
+        }
+
+        p { margin: 0; color: #ccc; }
+
+        button {
+            background: transparent;
+            color: var(--neon-blue);
+            border: 2px solid var(--neon-blue);
+            padding: 12px 20px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: all 0.2s;
+        }
+
+        button:hover { background: var(--neon-blue); color: black; box-shadow: 0 0 15px var(--neon-blue); }
+        button.shop-btn { border-color: var(--neon-pink); color: var(--neon-pink); }
+        button.shop-btn:hover { background: var(--neon-pink); box-shadow: 0 0 15px var(--neon-pink); }
+        
+        /* Kleiner Reset Button im HUD */
+        .hud-btn {
+            padding: 5px 10px;
+            font-size: 1.5rem;
+            line-height: 0.8;
+            border-radius: 5px;
+            background: rgba(0,0,0,0.5);
+        }
+
+        .shop-list {
+            max-height: 250px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .shop-item {
+            background: rgba(255,255,255,0.05);
+            padding: 10px;
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .price { color: #ffd700; font-size: 0.9em; }
+
+        /* Jump Area (Unsichtbar) */
+        #jump-area {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 5;
+        }
+
+        @keyframes shake {
+            0% { transform: translate(1px, 1px) rotate(0deg); }
+            25% { transform: translate(-1px, -2px) rotate(-1deg); }
+            50% { transform: translate(-1px, 2px) rotate(1deg); }
+            75% { transform: translate(1px, -1px) rotate(1deg); }
+            100% { transform: translate(1px, -2px) rotate(-1deg); }
+        }
+        .shake { animation: shake 0.3s; }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+    <div id="jump-area"></div>
+
+    <div id="ui-layer">
+        <div class="hud">
+            <div class="coin-counter">🪙 <span id="coin-display">0</span></div>
+            <div class="hud-right">
+                <!-- NEU: Reset Button -->
+                <button onclick="quickRestart()" class="hud-btn" title="Neustart">↺</button>
+                <button onclick="togglePause()" class="hud-btn">||</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- START SCREEN -->
+    <div id="start-screen" class="modal active">
+        <h1>Geo Dash Farm</h1>
+        <p>Schneller, härter, mehr Coins!</p>
+        <div style="font-size: 0.8rem; color: #888; margin-bottom: 20px;">
+            Preise reduziert! Farme für Skins & Doppelsprung.
+        </div>
+        <button onclick="startGame()">Starten</button>
+        <button class="shop-btn" onclick="openShop()">Shop</button>
+    </div>
+
+    <!-- GAME OVER SCREEN -->
+    <div id="crash-screen" class="modal">
+        <h1 style="color: #ff3333;">Gecrasht!</h1>
+        <p>Reset für einen sofortigen Neustart.</p>
+        <button onclick="resetGame()">Nochmal</button>
+        <button class="shop-btn" onclick="openShop()">Shop</button>
+    </div>
+
+    <!-- SHOP -->
+    <div id="shop-screen" class="modal">
+        <h2 style="color: var(--neon-pink)">Shop</h2>
+        <p>Deine Coins: <span id="shop-coins">0</span> 🪙</p>
+        <div class="shop-list" id="shop-items"></div>
+        <button onclick="closeShop()">Zurück</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let gameState = 'START'; 
+        let frameCount = 0;
+
+        let playerData = {
+            coins: 0,
+            skinColor: '#00f3ff',
+            unlockedColors: ['#00f3ff'],
+            doubleJumpUnlocked: false
+        };
+
+        // --- PREISE REDUZIERT (MEHR COINS EFFEKT) ---
+        const shopItems = [
+            { id: 'c_pink', type: 'color', name: 'Pink', price: 10, color: '#bc13fe', owned: false }, // War 50
+            { id: 'c_green', type: 'color', name: 'Grün', price: 20, color: '#0aff0a', owned: false }, // War 100
+            { id: 'c_orange', type: 'color', name: 'Orange', price: 50, color: '#ff6600', owned: false }, // War 200
+            { id: 'u_double', type: 'upgrade', name: 'Doppelsprung', price: 200, desc: 'Rettungsanker', owned: false } // War 1000
+        ];
+
+        // --- PHYSIK (SCHWERER) ---
+        const GRAVITY = 0.8;         // Schneller Fall
+        const JUMP_FORCE = -13;      // Kräftiger Sprung
+        const SPEED_X = 7.2;         // Sehr schnell!
+        const GROUND_Y_OFFSET = 150; 
+
+        const player = {
+            x: 100, y: 0, w: 40, h: 40,
+            dy: 0, angle: 0, jumpsLeft: 1
+        };
+
+        let cameraX = 0;
+        let blocks = [];
+        let spikes = [];
+        let coinsArr = [];
+        let particles = [];
+
+        function init() {
+            resize();
+            window.addEventListener('resize', resize);
+            try { loadData(); } catch(e) {}
+            updateCoinUI();
+            
+            window.addEventListener('keydown', (e) => {
+                if ((e.code === 'Space' || e.code === 'ArrowUp') && gameState === 'PLAYING') jump();
+                if (e.code === 'Escape') togglePause();
+            });
+
+            const jumpAction = (e) => {
+                if(e.target.tagName === 'BUTTON' || gameState !== 'PLAYING') return;
+                e.preventDefault();
+                jump();
+            };
+            document.addEventListener('mousedown', jumpAction);
+            document.addEventListener('touchstart', jumpAction, {passive: false});
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+
+        function loadData() {
+            const saved = localStorage.getItem('geoDashSaveFarm');
+            if(saved) {
+                const parsed = JSON.parse(saved);
+                playerData = { ...playerData, ...parsed };
+            }
+            shopItems.forEach(item => {
+                if(item.type === 'color' && playerData.unlockedColors.includes(item.color)) item.owned = true;
+                if(item.type === 'upgrade' && playerData.doubleJumpUnlocked) item.owned = true;
+            });
+        }
+
+        function saveData() {
+            localStorage.setItem('geoDashSaveFarm', JSON.stringify(playerData));
+        }
+
+        // --- LEVEL GENERIERUNG (SCHWER + VIELE COINS) ---
+        function generateLevel() {
+            blocks = [];
+            spikes = [];
+            coinsArr = [];
+            particles = [];
+            blocks.push({ x: 0, y: canvas.height - GROUND_Y_OFFSET, w: 800, h: GROUND_Y_OFFSET });
+            
+            let currentX = 800;
+            const groundLevel = canvas.height - GROUND_Y_OFFSET;
+            
+            while(currentX < 20000) {
+                const pattern = Math.floor(Math.random() * 7);
+                
+                // 0-2: Sichere Farm-Strecken (Viele Coins)
+                if (pattern >= 0 && pattern <= 2) {
+                    const len = 400;
+                    blocks.push({ x: currentX, y: groundLevel, w: len, h: GROUND_Y_OFFSET });
+                    // Viele Coins!
+                    for(let i=0; i<6; i++) {
+                        coinsArr.push({ x: currentX + 40 + (i*60), y: groundLevel - 60 - (Math.random()*20), r: 12 });
+                    }
+                    currentX += len;
+                } 
+                // 3: Doppel-Stachel (Classic)
+                else if (pattern === 3) {
+                    const len = 400;
+                    blocks.push({ x: currentX, y: groundLevel, w: len, h: GROUND_Y_OFFSET });
+                    // Coins drüber für Mutige
+                    coinsArr.push({ x: currentX + 200, y: groundLevel - 120, r: 12 });
+                    spikes.push({ x: currentX + 180, y: groundLevel - 30, w: 40, h: 40 });
+                    spikes.push({ x: currentX + 230, y: groundLevel - 30, w: 40, h: 40 });
+                    currentX += len;
+                }
+                // 4: Dreier-Stachel (Hard)
+                else if (pattern === 4) {
+                    const len = 400;
+                    blocks.push({ x: currentX, y: groundLevel, w: len, h: GROUND_Y_OFFSET });
+                    for(let i=0; i<3; i++) {
+                        spikes.push({ x: currentX + 170 + (i*45), y: groundLevel - 30, w: 40, h: 40 });
+                    }
+                    currentX += len;
+                }
+                // 5: Stachel-Welle (Dicht)
+                else if (pattern === 5) {
+                    const len = 500;
+                    blocks.push({ x: currentX, y: groundLevel, w: len, h: GROUND_Y_OFFSET });
+                    for(let i=0; i<4; i++) {
+                        spikes.push({ x: currentX + 100 + (i*80), y: groundLevel - 30, w: 40, h: 40 });
+                    }
+                    currentX += len;
+                }
+                // 6: Weite Lücke mit Plattform
+                else {
+                    const gapLen = 220; 
+                    const platformY = groundLevel - 80;
+                    blocks.push({ x: currentX + 80, y: platformY, w: 150, h: GROUND_Y_OFFSET });
+                    // Coins auf der Plattform
+                    coinsArr.push({ x: currentX + 155, y: platformY - 50, r: 12 });
+                    currentX += gapLen + 50;
+                }
+            }
+        }
+
+        // --- LOGIK ---
+        function startGame() {
+            hideAllModals();
+            resetGameVars();
+            generateLevel();
+            gameState = 'PLAYING';
+        }
+
+        function resetGame() {
+            hideAllModals();
+            resetGameVars();
+            generateLevel();
+            gameState = 'PLAYING';
+        }
+
+        // NEU: Quick Restart Funktion
+        function quickRestart() {
+            if (gameState === 'START') return;
+            // Sofortiger Reset ohne Menü
+            resetGameVars();
+            generateLevel();
+            gameState = 'PLAYING';
+        }
+
+        function resetGameVars() {
+            player.x = 100;
+            player.y = canvas.height - GROUND_Y_OFFSET - player.h;
+            player.dy = 0;
+            player.angle = 0;
+            player.jumpsLeft = playerData.doubleJumpUnlocked ? 2 : 1;
+            cameraX = 0;
+            coinsArr.forEach(c => c.collected = false);
+        }
+
+        function jump() {
+            if (player.jumpsLeft > 0) {
+                player.dy = JUMP_FORCE;
+                player.jumpsLeft--;
+            }
+        }
+
+        function die() {
+            gameState = 'CRASHED';
+            document.body.classList.add('shake');
+            createParticles(player.x + player.w/2 - cameraX, player.y + player.h/2, playerData.skinColor, 20);
+            setTimeout(() => {
+                document.body.classList.remove('shake');
+                showModal('crash-screen');
+            }, 300);
+        }
+
+        function togglePause() {
+            if (gameState === 'PLAYING') {
+                gameState = 'PAUSED';
+                showModal('start-screen');
+                document.querySelector('#start-screen h1').innerText = "Pause";
+                document.querySelector('#start-screen button').innerText = "Weiter";
+                // Shop Button im Menü anzeigen
+                document.querySelector('#start-screen .shop-btn').style.display = "block";
+            } else if (gameState === 'PAUSED') {
+                hideAllModals();
+                gameState = 'PLAYING';
+                document.querySelector('#start-screen h1').innerText = "Geo Dash Farm";
+                document.querySelector('#start-screen button').innerText = "Starten";
+            }
+        }
+
+        // --- LOOP ---
+        function gameLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (gameState === 'PLAYING') update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function update() {
+            player.x += SPEED_X;
+            cameraX = player.x - 100;
+            player.dy += GRAVITY;
+            player.y += player.dy;
+
+            if (!player.grounded) player.angle += 5; 
+            else {
+                const rest = player.angle % 90;
+                if (rest > 45) player.angle += (90 - rest);
+                else player.angle -= rest;
+            }
+
+            player.grounded = false;
+            const nearbyBlocks = blocks.filter(b => b.x + b.w > player.x - 50 && b.x < player.x + player.w + 50);
+            
+            nearbyBlocks.forEach(b => {
+                if (rectIntersect(player.x, player.y, player.w, player.h, b.x, b.y, b.w, b.h)) {
+                    const prevY = player.y - player.dy;
+                    if (prevY + player.h <= b.y + 10) {
+                        player.grounded = true;
+                        player.dy = 0;
+                        player.y = b.y - player.h;
+                        player.jumpsLeft = playerData.doubleJumpUnlocked ? 2 : 1;
+                    } else {
+                        die();
+                    }
+                }
+            });
+
+            if (player.y > canvas.height) die();
+
+            const nearbySpikes = spikes.filter(s => s.x + s.w > player.x - 10 && s.x < player.x + player.w + 10);
+            nearbySpikes.forEach(s => {
+                if (rectIntersect(player.x + 10, player.y + 10, player.w - 20, player.h - 20, s.x + 5, s.y + 10, s.w - 10, s.h - 10)) {
+                    die();
+                }
+            });
+
+            coinsArr.forEach(c => {
+                if (!c.collected) {
+                    const dx = (player.x + player.w/2) - c.x;
+                    const dy = (player.y + player.h/2) - c.y;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    if (dist < player.w/2 + c.r) {
+                        c.collected = true;
+                        playerData.coins++;
+                        saveData();
+                        updateCoinUI();
+                        createParticles(c.x - cameraX + canvas.width/2, c.y, '#ffd700', 5);
+                    }
+                }
+            });
+
+            particles.forEach((p, i) => {
+                p.x += p.vx; p.y += p.vy; p.life -= 0.05;
+                if(p.life <= 0) particles.splice(i, 1);
+            });
+        }
+
+        function draw() {
+            ctx.save();
+            
+            // Grid
+            ctx.strokeStyle = 'rgba(0, 243, 255, 0.05)';
+            ctx.lineWidth = 1;
+            const gridSize = 50;
+            const offsetX = -(cameraX % gridSize);
+            for(let x=offsetX; x<canvas.width; x+=gridSize) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke(); }
+            for(let y=0; y<canvas.height; y+=gridSize) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke(); }
+
+            const renderX = (objX) => objX - cameraX;
+
+            // Blocks
+            ctx.fillStyle = '#000';
+            ctx.strokeStyle = '#00f3ff';
+            ctx.lineWidth = 2;
+            blocks.forEach(b => {
+                if(b.x - cameraX > canvas.width + 100 || b.x + b.w - cameraX < -100) return;
+                const rx = renderX(b.x);
+                ctx.fillRect(rx, b.y, b.w, b.h);
+                ctx.strokeRect(rx, b.y, b.w, b.h);
+            });
+
+            // Spikes
+            ctx.fillStyle = '#ff3333';
+            ctx.shadowBlur = 5;
+            ctx.shadowColor = '#ff3333';
+            spikes.forEach(s => {
+                if(s.x - cameraX > canvas.width + 100 || s.x + s.w - cameraX < -100) return;
+                const rx = renderX(s.x);
+                ctx.beginPath();
+                ctx.moveTo(rx, s.y + 30);       
+                ctx.lineTo(rx + s.w/2, s.y);    
+                ctx.lineTo(rx + s.w, s.y + 30);
+                ctx.closePath();
+                ctx.fill();
+            });
+            ctx.shadowBlur = 0;
+
+            // Coins
+            ctx.fillStyle = '#ffd700';
+            coinsArr.forEach(c => {
+                if(c.collected) return;
+                const rx = renderX(c.x);
+                ctx.beginPath(); ctx.arc(rx, c.y, c.r, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(rx - 3, c.y - 3, 3, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#ffd700';
+            });
+
+            // Player
+            ctx.save();
+            ctx.translate(renderX(player.x) + player.w/2, player.y + player.h/2);
+            ctx.rotate(player.angle * Math.PI / 180);
+            ctx.fillStyle = playerData.skinColor;
+            ctx.shadowBlur = 15; ctx.shadowColor = playerData.skinColor;
+            ctx.fillRect(-player.w/2, -player.h/2, player.w, player.h);
+            ctx.fillStyle = '#000'; ctx.fillRect(2, -10, 8, 8); ctx.fillRect(12, -10, 4, 4);
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.strokeRect(-player.w/2, -player.h/2, player.w, player.h);
+            ctx.restore();
+
+            particles.forEach(p => { ctx.fillStyle = p.color; ctx.globalAlpha = p.life; ctx.fillRect(p.x, p.y, p.size, p.size); });
+            ctx.globalAlpha = 1;
+            ctx.restore();
+        }
+
+        function rectIntersect(x1, y1, w1, h1, x2, y2, w2, h2) {
+            return x2 < x1 + w1 && x2 + w2 > x1 && y2 < y1 + h1 && y2 + h2 > y1;
+        }
+
+        function createParticles(x, y, color, count) {
+            for(let i=0; i<count; i++) {
+                particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 10, vy: (Math.random() - 0.5) * 10, life: 1.0, color: color, size: Math.random() * 5 + 2 });
+            }
+        }
+
+        // --- SHOP ---
+        function openShop() {
+            document.getElementById('shop-coins').innerText = playerData.coins;
+            renderShopItems();
+            showModal('shop-screen');
+        }
+
+        function closeShop() {
+            hideAllModals();
+            if (gameState === 'START') showModal('start-screen');
+        }
+
+        function renderShopItems() {
+            const list = document.getElementById('shop-items');
+            list.innerHTML = '';
+            document.getElementById('shop-coins').innerText = playerData.coins;
+
+            shopItems.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'shop-item';
+                const info = document.createElement('div');
+                let nameTxt = item.name;
+                if (item.type === 'color') nameTxt += ` <span style="display:inline-block;width:12px;height:12px;background:${item.color};margin-left:5px;border:1px solid #fff;"></span>`;
+                info.innerHTML = `<div>${nameTxt}</div><div class="price">${item.owned ? 'Im Besitz' : item.price + ' 🪙'}</div>`;
+
+                const btn = document.createElement('button');
+                btn.style.fontSize = '0.8rem'; btn.style.padding = '5px 10px';
+
+                if (item.owned) {
+                    if (item.type === 'color') {
+                        if (playerData.skinColor === item.color) { btn.innerText = "Ausgewählt"; btn.disabled = true; }
+                        else { btn.innerText = "Anziehen"; btn.onclick = () => { playerData.skinColor = item.color; saveData(); renderShopItems(); }; }
+                    } else { btn.innerText = "Aktiv"; btn.disabled = true; }
+                } else {
+                    if (playerData.coins >= item.price) { btn.innerText = "Kaufen"; btn.onclick = () => buyItem(item); }
+                    else { btn.innerText = "Zu teuer"; btn.disabled = true; btn.style.opacity = 0.5; }
+                }
+                div.appendChild(info); div.appendChild(btn); list.appendChild(div);
+            });
+        }
+
+        function buyItem(item) {
+            if (playerData.coins >= item.price && !item.owned) {
+                playerData.coins -= item.price; item.owned = true;
+                if (item.type === 'color') playerData.unlockedColors.push(item.color);
+                if (item.type === 'upgrade') { playerData.doubleJumpUnlocked = true; player.jumpsLeft = 2; }
+                saveData(); updateCoinUI(); renderShopItems();
+            }
+        }
+
+        function showModal(id) { document.getElementById(id).classList.add('active'); }
+        function hideAllModals() { document.querySelectorAll('.modal').forEach(m => m.classList.remove('active')); }
+        function updateCoinUI() { document.getElementById('coin-display').innerText = playerData.coins; }
+
+        window.onload = init;
+
+    </script>
+</body>
+</html>
